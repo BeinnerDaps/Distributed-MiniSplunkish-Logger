@@ -1,0 +1,57 @@
+- forwarder.py on server0:
+python3 forwarder.py /var/log/syslog 10.20.101.43
+
+- Querying:
+curl "http://10.20.101.43:5000/search?q=systemd"
+curl "http://10.20.101.43:5000/search?q=tailscaled"
+curl "http://10.20.101.43:5000/search?q=CRON"
+
+- Querying with date:
+curl "http://10.20.101.43:5000/search?q=systemd&date=Jul+8"
+curl "http://10.20.101.43:5000/search?q=tailscaled&date=Jul+6"
+curl "http://10.20.101.43:5000/search?q=CRON&date=Jul+7"
+
+- Explicit LOGS sending (POST):
+curl -X POST "http://10.20.101.43:5000/ingest" \
+     -H "Content-Type: application/json" \
+     -d '{"logs":["Jul  8 14:09:54 NSDSYST14-Server0 systemd[1]: systemd-tmpfiles-clean.service: Deactivated successfully.",
+                  "Jul  8 14:32:36 NSDSYST14-Server0 tailscaled[12671]: wgengine: set DNS config again after major link change"]}'
+
+- Explicit ONE LOG sending (POST):
+curl -X POST "http://10.20.101.43:5000/ingest" \
+     -H "Content-Type: application/json" \
+     -d '{"logs":["Jul  8 15:00:01 NSDSYST14-Server0 CRON[655300]: (root) CMD (   cd / && run-parts --report /etc/cron.hourly)"]}'
+
+- Purge:
+curl -X POST "http://10.20.101.43:5000/purge"
+
+- Direct ingest to worker1 on server1 (POST):
+curl -X POST "http://10.20.101.44:6000/ingest" \
+     -H "Content-Type: application/json" \
+     -d '{"logs":["Jul  8 14:09:54 NSDSYST14-Server0 systemd[1]: systemd-tmpfiles-clean.service: Deactivated successfully."]}'
+
+- Direct search in worker1 on server1:
+curl "http://10.20.101.44:6000/search?q=systemd"
+
+- Search by host (SEARCH_HOST):
+curl "http://10.20.101.43:5000/query?mode=SEARCH_HOST&value=NSDSYST14-Server0"
+
+- Search by daemon (SEARCH_DAEMON)
+curl "http://10.20.101.43:5000/query?mode=SEARCH_DAEMON&value=systemd"
+curl "http://10.20.101.43:5000/query?mode=SEARCH_DAEMON&value=tailscaled"
+
+- Search by severity (SEARCH_SEVERITY):
+curl "http://10.20.101.43:5000/query?mode=SEARCH_SEVERITY&value=ERROR"
+curl "http://10.20.101.43:5000/query?mode=SEARCH_SEVERITY&value=INFO"
+
+- Search by keyword (SEARCH_KEYWORD):
+curl "http://10.20.101.43:5000/query?mode=SEARCH_KEYWORD&value=CRON"
+curl "http://10.20.101.43:5000/query?mode=SEARCH_KEYWORD&value=systemd"
+
+
+- Count keyword (COUNT_KEYWORD):
+curl "http://10.20.101.43:5000/query?mode=COUNT_KEYWORD&value=systemd"
+curl "http://10.20.101.43:5000/query?mode=COUNT_KEYWORD&value=tailscaled"
+
+
+
