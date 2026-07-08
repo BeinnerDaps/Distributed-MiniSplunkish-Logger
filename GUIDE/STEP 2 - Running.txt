@@ -1,0 +1,10 @@
+- Initialize workers on all servers from 0 to 2:
+sudo docker compose up --build -d
+
+- Run on Server 0:
+python3 forwarder.py /var/log/syslog 10.20.101.43
+
+- Sample query:
+curl "http://10.20.101.43:5000/search?q=systemd"
+
+- More commands in Command List.txt

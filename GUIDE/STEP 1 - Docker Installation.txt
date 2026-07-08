@@ -1,0 +1,48 @@
+sudo apt update
+
+sudo apt upgrade -y
+
+sudo apt install -y ca-certificates curl gnupg lsb-release
+
+sudo mkdir -p /etc/apt/keyrings
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+docker --version
+
+docker compose version
+
+- IF EXISTING DOCKER IMAGE FOR GATEWAY:
+sudo docker compose down
+
+- Building for all servers:
+sudo docker compose build
+sudo docker compose up -d
+
+- Checking (should have both gateway.py and etcd for server0, worker and elasticsearch for server1 and server2):
+sudo docker ps -a
+
+- Testing (go to forwarder in server0):
+python3 forwarder.py /var/log/syslog 10.20.101.43
+
+- Check gateway logs on Server0:
+sudo docker logs -f gateway
+
+- Try querying:
+curl "http://10.20.101.43:5000/search?q=systemd"
+
+- Try a specific date:
+curl "http://10.20.101.43:5000/search?q=systemd&date=Jul++8"
+# + corresponds to a whitespace, note that the format of the log has 2 whitespaces between the month and day
+
+- More commands in "Command List.txt"
