@@ -1,5 +1,7 @@
-import pika, json, requests
-import re, os
+import json
+import requests
+import re
+import os
 
 ELASTICSEARCH_URL = "http://elasticsearch:9200/logs"
 
@@ -39,74 +41,106 @@ class Forwarder:
         self.gateway_ip = gateway_ip
         self.username = username
         self.password = password
-        self.create_connection()
 
-    def ingest(self, file_path, gateway_ip):
-        if not os.path.basename(file_path):
-            return f"Error: File '{file_path}' not found."
+    def ingest(self, file_path):
+        if not os.path.exists(file_path):
+            print(f"[!] Error: File '{file_path}' not found.")
+            return
 
         file_name = os.path.basename(file_path)
-        url = f"http://{gateway_ip}:8000/ingest/"
+        url = f"http://{self.gateway_ip}:8000/ingest/"
         
-        print(f"[*] Forwarder: Streaming raw payload '{file_name}' to Gateway ({gateway_ip})...")
+        print(f"[*] Forwarder: Streaming raw payload '{file_name}' to Gateway ({self.gateway_ip})...")
 
         try:
             with open(file_path, "rb") as f:
-                files = {"file":(file_name, f, "text/plain")}
+                files = {"file": (file_name, f, "text/plain")}
                 response = requests.post(url, files=files)
 
                 if response.status_code == 200:
                     result = response.json()
                     print(f"[+] Success: Transmitted raw payload successfully.")
-                    print(f"[+] Server Response: {result['message']} ({result['batches_queued']} batches queued)")
+                    print(f"[+] Server Response: {result.get('message')} ({result.get('total_batch_count')} batches queued)")
                 else:
                     print(f"[!] Gateway Error ({response.status_code}): {response.text}")
 
         except requests.exceptions.RequestException as e:
-            print(f"[!] Network Error: Could not connect to Gateway at {gateway_ip}. Details: {e}")
+            print(f"[!] Network Error: Could not connect to Gateway at {self.gateway_ip}. Details: {e}")
 
-    def query(self, mode, value, gateway_ip):
-        url = f"http://{gateway_ip}:8000/query"
-        response = requests(url, params={"mode":mode,"value":value, "qsize": 100})
+    def query(self, mode, value):
+        url = f"http://{self.gateway_ip}:8000/query/"
+        
+        try:
+            # FastAPI endpoint was defined as @app.post("/query/")
+            response = requests.post(url, params={"mode": mode, "value": value, "qsize": 100})
 
-        if response.status_code == 200:
-            results = response.json()
+            if response.status_code == 200:
+                results = response.json()
 
-            if mode == "COUNT_KEYWORD":
-                print(f"[+] Success: Found {results["count"]} logs with matchin keyword '{value}'")
-            
-            if mode != "COUNT_KEYWORD":
-                for idx, doc in enumerate(results["results"], start=1):
-                    print(f"[{idx}].[{doc.get('timestamp')}] {doc.get('hostname')} {doc.get('process')}: {doc.get('message')}")
+                if mode == "COUNT_KEYWORD":
+                    print(f"[+] Success: Found {results.get('count', 0)} logs with matching keyword '{value}'")
+                else:
+                    hits = results.get("results", [])
+                    print(f"[+] Found {len(hits)} results:")
+                    for idx, doc in enumerate(hits, start=1):
+                        print(f"[{idx}].[{doc.get('timestamp')}] {doc.get('hostname')} {doc.get('process')}: {doc.get('message')}")
+            else:
+                print(f"[!] Query failed: {response.text}")
+                
+        except requests.exceptions.RequestException as e:
+             print(f"[!] Network Error: Could not connect to Gateway at {self.gateway_ip}. Details: {e}")
 
-        else:
-            print(f"[!] Query failed: {response.text}")
-
-    def purge(self, gateway_ip):
-        url = f"http://{gateway_ip}:8000/purge/"
-        response = requests.post(url)
-
-        if response.status_code == 200:
-            print(f"[+] Success: Purged all logs from servers.")
-        else:
-            print(f"[!] Gateway Error ({response.status_code}): {response.text}")
+    def purge(self):
+        url = f"http://{self.gateway_ip}:8000/purge/"
+        try:
+            response = requests.post(url)
+            if response.status_code == 200:
+                print(f"[+] Success: Purged all logs from servers.")
+            else:
+                print(f"[!] Gateway Error ({response.status_code}): {response.text}")
+        except requests.exceptions.RequestException as e:
+             print(f"[!] Network Error: Could not connect to Gateway at {self.gateway_ip}. Details: {e}")
 
     def process_command(self, command: str):
-        pass
+        parts = command.strip().split()
+        if not parts:
+            return
+
+        cmd = parts[0].lower()
+
+        if cmd == "ingest" and len(parts) == 2:
+            self.ingest(parts[1])
+        elif cmd == "query" and len(parts) >= 3:
+            mode = parts[1].upper()
+            value = " ".join(parts[2:])
+            self.query(mode, value)
+        elif cmd == "purge":
+            self.purge()
+        elif cmd in ["exit", "quit"]:
+            print("Exiting...")
+            exit(0)
+        else:
+            print("[!] Invalid command format.")
+            print("    Available commands:")
+            print("    - ingest <file_path>")
+            print("    - query <MODE> <value>")
+            print("    - purge")
+            print("    - exit")
 
 def main():
-    
-    gateway_ip = input("Enter IP of gateway server: ")
-    username = input("Username: ")
-    password = input("Password: ")
+    gateway_ip = input(f"Enter IP of gateway server [{EC2_Gateway_IP}]: ").strip() or EC2_Gateway_IP
+    username = input(f"Username [{DEFAULT_USERNAME}]: ").strip() or DEFAULT_USERNAME
+    password = input(f"Password [{DEFAULT_PASSWORD}]: ").strip() or DEFAULT_PASSWORD
 
     forwarder = Forwarder(gateway_ip, username, password)
 
     while True:
-        command = input("Enter a command:" )
-
-        command_dict = forwarder.process_command(command)
+        try:
+            command = input("\nEnter a command: ")
+            forwarder.process_command(command)
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
 
 if __name__ == "__main__":
     main()
-        
