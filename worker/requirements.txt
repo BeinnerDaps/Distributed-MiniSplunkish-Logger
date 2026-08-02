@@ -1,0 +1,2 @@
+pika==1.4.1
+elasticsearch==9.4.1

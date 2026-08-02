@@ -1,0 +1,59 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: ${NODE_SELF}-container
+    network_mode: "host"
+    environment:
+      - node.name=${NODE_SELF}
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.seed_hosts=${WORKER_1_IP},${WORKER_2_IP},${WORKER_3_IP}
+      - cluster.initial_master_nodes=${NODE_NAME1},${NODE_NAME2},${NODE_NAME3}
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=Xms1g -Xmx1g
+    restart: always
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+  
+  # Worker to Gateway Bridge
+  worker_to_gateway:
+    build: .
+    container_name: ${NODE_SELF}_worker_to_gateway
+    network_mode: "host"
+    command: ["python3", "W2G_node.py"]
+    environment:
+      - SERVER_NAME=${NODE_SELF}
+      - USERNAME=${USERNAME}
+      - PASSWORD=${PASSWORD}
+      - NUM_THREADS=${NUM_THREADS}
+      - GATEWAY_IP=${GATEWAY_IP}
+      - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
+      - INDEX_NAME=${INDEX_NAME}
+      - QUEUE_NAME=${QUEUE_NAME}
+    restart: always
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+  
+  # Worker to Worker Bridge
+  # worker_to_worker:
+  #   build: .
+  #   container_name: ${NODE_SELF}_worker_to_worker
+  #   network_node: "host"
+  #   command: ["python3", "W2W_node.py"]
+  #   environment:
+  #     - GATEWAY_IP=${GATEWAY_IP}
+  #     - WORKER_ID=${NODE_SELF}
+  #   restart: always
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+
+volumes:
+  es_data:
+    name: ${NODE_SELF}_data

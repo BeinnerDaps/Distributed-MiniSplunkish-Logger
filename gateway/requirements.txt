@@ -1,0 +1,11 @@
+aio-pika
+cryptography
+elasticsearch
+fastapi
+httpx
+pydantic
+pydantic-settings
+PyJWT
+python-multipart
+redis
+uvicorn[standard]

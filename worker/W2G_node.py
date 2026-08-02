@@ -1,37 +1,13 @@
 import hashlib
 import json
+import os
 import pika 
 import re
-import requests
 import threading
 import time
 from datetime import datetime, timezone
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
-
-username    = 'rabbituser'
-password    = 'rabbit1234'
-num_threads = 4
-
-GTWY_PUB_IP = "3.0.107.3"
-SVRS_PUB_IP = "103.231.240.136"
-
-GTWY_VPN_IP = "10.13.13.1"
-SVR0_VPN_IP = "10.13.13.7"
-SVR1_VPN_IP = "10.13.13.8"
-SVR2_VPN_IP = "10.13.13.9"
-
-
-RABBITMQ_IP = GTWY_VPN_IP
-
-ES_CLUSTER_NODES = [
-    f'http://{SVR0_VPN_IP}:9200',
-    f'http://{SVR1_VPN_IP}:9200',
-    f'http://{SVR2_VPN_IP}:9200'
-]
-
-INDEX_NAME = 'distributed-logs'
-QUEUE_NAME = 'log_ingest_queue'
 
 SYSLOG_REGEX = re.compile(
     r"""
@@ -48,13 +24,19 @@ SYSLOG_REGEX = re.compile(
 )
 
 class Worker:
-    def __init__(self, srvr_name: str, username: str , password: str, num_threads: int):
+    def __init__(self, srvr_name: str, username: str , password: str, num_threads: int,
+        gateway_ip: str, es_cluster: list[str], index_name: str, queue_name: str
+    ):
         self.srvr_name      = srvr_name
         self.username       = username
         self.password       = password
+        self.gateway_ip     = gateway_ip
         self.num_threads    = num_threads
-        self.es             = Elasticsearch(hosts=ES_CLUSTER_NODES)
-    
+        self.index_name     = index_name
+        self.queue_name     = queue_name
+        self.es_cluster     = es_cluster
+        self.es             = Elasticsearch(hosts=es_cluster)
+
         print("-- Distributed Event Logger initialized. --") 
 
     def start(self):
@@ -82,13 +64,13 @@ class Worker:
 
     def initialize_distributed_index(self):
         try:
-            if self.es.indices.exists(index=INDEX_NAME):
-                print(f" [*] Worker: Index '{INDEX_NAME}' already online in cluster.")
+            if self.es.indices.exists(index=self.index_name):
+                print(f" [*] Worker: Index '{self.index_name}' already online in cluster.")
                 return
 
             index_body = {
                 "settings": {
-                    "number_of_shards": len(ES_CLUSTER_NODES),
+                    "number_of_shards": len(self.es_cluster),
                     "number_of_replicas": 1
                 },
                 "mappings": {
@@ -102,19 +84,19 @@ class Worker:
                     }
                 }
             }
-            self.es.indices.create(index=INDEX_NAME, body=index_body)
+            self.es.indices.create(index=self.index_name, body=index_body)
         except Exception as e:
             print(f" [!] Error initializing index: {e}")
 
     def _ingest_batch_thread_worker(self, thread_id: int):
-        print(f" [*] {self.srvr_name} thread-{thread_id}: connecting to RabbitMQ broker at {RABBITMQ_IP}...")
+        print(f" [*] {self.srvr_name} thread-{thread_id}: connecting to RabbitMQ broker at {self.gateway_ip}...")
         while True:
             try:
                 # Thread-isolated connection and channel
                 credentials = pika.PlainCredentials(self.username, self.password)
                 connection = pika.BlockingConnection(
                     pika.ConnectionParameters(
-                        host=RABBITMQ_IP,
+                        host=self.gateway_ip,
                         port=5672, 
                         virtual_host='/',
                         credentials=credentials,
@@ -122,14 +104,14 @@ class Worker:
                         blocked_connection_timeout=300
                     )
                 )
+                
                 channel = connection.channel()
-                channel.queue_declare(queue=QUEUE_NAME)
-                print(f" [*] Central Server: {RABBITMQ_IP} Ready. Awaiting log requests...") 
+                channel.queue_declare(queue=self.queue_name)
+                print(f" [*] Central Server: {self.gateway_ip} Ready. Awaiting log requests...") 
 
                 def message_callback(ch, method, properties, body):
-                    batch_id = "unknown"
                     try:
-                        payload = json.loads(body.decode('utf-8'))
+                        payload  = json.loads(body.decode('utf-8'))
                         batch_id = payload.get("batch_id", "fallback")
                         raw_logs = payload.get("logs_batch", [])
 
@@ -137,30 +119,28 @@ class Worker:
                             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                             return
 
+                        # Assign batch IDs to logs to prevent duplicates (overwrite logs with same batch_id)
                         actions = []
                         for idx, raw_line in enumerate(raw_logs):
-                            doc_id = self._generate_doc_id(batch_id, idx)
-                            doc = self.parse_logs(raw_line.strip()) 
                             actions.append({
                                 "_op_type": "index",
-                                "_index": self.index_name,
-                                "_id": doc_id,
-                                "_source": doc
+                                "_index":   self.index_name,
+                                "_id":      self._generate_doc_id(batch_id, idx),
+                                "_source":  self.parse_logs(raw_line.strip())
                             })
 
-                        # 1. Bulk write to Elasticsearch
+                        # Bulk write to Elasticsearch
                         success_count, _ = bulk(self.es, actions, stats_only=False)
 
-                        # 2. ACK message only after successful ES bulk write
+                        # ACK message only after successful ES bulk write
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         print(f" [Thread-{thread_id}] Indexed {success_count} logs for Batch: {batch_id[:8]}... (ACKed)")
-
                     except Exception as e:
                         print(f" [!] Error in {self.srvr_name} thread-{thread_id} batch {batch_id[:8]}: {e}. Requeuing...")
                         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
                 channel.basic_qos(prefetch_count=1)
-                channel.basic_consume(queue=QUEUE_NAME, on_message_callback=message_callback)
+                channel.basic_consume(queue=self.queue_name, on_message_callback=message_callback)
                 channel.start_consuming()
 
             except pika.exceptions.AMQPConnectionError as conn_err:
@@ -198,19 +178,15 @@ class Worker:
 
 
 if __name__ == "__main__":
-
-    server_name = input(f"Enter name of server: ")
-    username    = input(f"Enter RabbitMQ username ['{username}']: ")
-    password    = input(f"Enter RabbitMQ password ['{password}']: ")
-    num_threads = input(f"Enter Number of threads ['{num_threads}']: ")
-
     worker = Worker(
-        server_name=server_name, 
-        username=username, 
-        password=password, 
-        num_threads=num_threads
+        server_name = os.getenv("SERVER_NAME", "default_name"), 
+        username    = os.getenv("USERNAME",    "default_usr"), 
+        password    = os.getenv("PASSWORD",    "default_pwd"), 
+        gateway_ip  = os.getenv("GATEWAY_IP",  "127.0.0.1"),
+        es_cluster  = os.getenv("ES_CLUSTER",  "http://localhost:9200").split(","),
+        index_name  = os.getenv("INDEX_NAME",  "default_idx"),
+        queue_name  = os.getenv("QUEUE_NAME",  "default_que"),
+        num_threads = os.getenv("NUM_THREADS", 0),
     )
     worker.start()
-
-
     

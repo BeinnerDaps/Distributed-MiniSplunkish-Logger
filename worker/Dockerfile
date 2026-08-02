@@ -1,11 +1,16 @@
+# Use lightweight Python base image
 FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y gcc libssl-dev && rm -rf /var/lib/apt/lists/*
-
+# Set working directory inside the container
 WORKDIR /app
 
-COPY worker.py .
+# Copy dependencies file and install them 
+COPY requirements.txt .
 
-RUN pip install --no-cache-dir flask requests etcd3
+# Install curl for potential health checks or debugging
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libssl-dev \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y --auto-remove gcc libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["python", "worker.py"]
+COPY . .

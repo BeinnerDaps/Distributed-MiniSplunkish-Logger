@@ -1,0 +1,62 @@
+services:
+  # Rabbitmq message broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbit-svr
+    container_name: nsdsyst-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=#{RABBITMQ_DEFAULT_PASS}
+    restart: always
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+  
+  # Setup Rabbitmq user for workers to use.
+  rabbitmq_setup:
+    image: rabbitmq:3-management
+    container_name: nsdsyst-rabbitmq-setup
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: >
+      bash -c "echo 'Configuring Worker User...' &&
+      rabbitmqadmin -H rabbitmq -u ${RABBITMQ_DEFAULT_USER} -p ${RABBITMQ_DEFAULT_PASS} declare user name=${RABBITMQ_WORKER_USER} password=${RABBITMQ_WORKER_PASS} tags=none &&
+      rabbitmqadmin -H rabbitmq -u ${RABBITMQ_DEFAULT_USER} -p ${RABBITMQ_DEFAULT_PASS} declare permission vhost=/ user=${RABBITMQ_WORKER_USER} configure='.*' write='.*' read='.*' &&
+      echo 'Successfully created rabbitmq user account for worker!'"
+    restart: no
+  
+  # Gateway to Worker Bridge
+  gateway_app:
+    build: .
+    container_name: gateway_app
+    network_mode: "host"
+    command: ["python3", "Gateway_node.py"]
+    environment:
+      - USERNAME=${RABBITMQ_WORKER_USER}
+      - PASSWORD=${RABBITMQ_WORKER_PASS}
+      - BATCH_SIZE=${BATCH_SIZE}
+      - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
+      - INDEX_NAME=${INDEX_NAME}
+      - QUEUE_NAME=${QUEUE_NAME}
+      - PYTHONUNBUFFERED=1
+    restart: always
+    volumes:
+      - .:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      rabbitmq_setup:
+        condition: service_completed_successfully
+
+volumes:
+  rabbitmq_data:
+    name: gateway_rabbitmq_data
