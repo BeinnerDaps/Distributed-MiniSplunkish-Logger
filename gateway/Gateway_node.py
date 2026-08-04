@@ -36,6 +36,24 @@ class Gateway:
         # Declare queue as durable (persistent even after RabbitMQ broker restarts)
         await self.channel.declare_queue(self.queue_name, durable=True)
         print("[+] Successfully established connection with RabbitMQ broker.")
+        # await self.test_connection()
+
+    async def test_connection(self, counter=1):
+        while True:
+            payload = f"TEST-TEST-TEST #{counter}".encode("utf-8")
+            # Send message directly to the queue
+            message = aio_pika.Message(
+                body=payload,
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+            )
+            await self.channel.default_exchange.publish(
+                message,
+                routing_key=self.queue_name
+            )
+            print(f" [->] Sent to queue '{self.queue_name}': {payload}")
+            counter += 1
+            await asyncio.sleep(1)
+
 
     async def close(self):
         """Gracefully close connection with RabbitMQ broker on server shutdown."""
@@ -139,7 +157,7 @@ class Gateway:
 gateway = Gateway(
     username    = os.getenv("USERNAME",   "default_name"),
     password    = os.getenv("PASSWORD",   "default_password"),
-    queue_name  = os.getenv("QUEUE_NAME", "default_que_name"), # "log_ingest_queue" 
+    queue_name  = os.getenv("QUEUE_NAME", "default_que_name"),
     index_name  = os.getenv("INDEX_NAME", "default_idx"),
     es_cluster  = os.getenv("ES_CLUSTER", "http://localhost:9200").split(","),
     batch_size  = os.getenv("BATCH_SIZE", 0)
