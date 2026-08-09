@@ -1,6 +1,10 @@
 # Use lightweight Python base image
 FROM python:3.10-slim
 
+# Prevent Python from writing bytecode and buffering stdout
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Set working directory inside the container
 WORKDIR /app
 

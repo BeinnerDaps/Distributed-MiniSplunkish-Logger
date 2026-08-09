@@ -8,8 +8,8 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
-      - RABBITMQ_DEFAULT_PASS=#{RABBITMQ_DEFAULT_PASS}
+      - RABBITMQ_DEFAULT_USER=${RABBIT_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBIT_DEFAULT_PASS}
     restart: always
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
@@ -29,26 +29,39 @@ services:
         condition: service_healthy
     command: >
       bash -c "echo 'Configuring Worker User...' &&
-      rabbitmqadmin -H rabbitmq -u ${RABBITMQ_DEFAULT_USER} -p ${RABBITMQ_DEFAULT_PASS} declare user name=${RABBITMQ_WORKER_USER} password=${RABBITMQ_WORKER_PASS} tags=none &&
-      rabbitmqadmin -H rabbitmq -u ${RABBITMQ_DEFAULT_USER} -p ${RABBITMQ_DEFAULT_PASS} declare permission vhost=/ user=${RABBITMQ_WORKER_USER} configure='.*' write='.*' read='.*' &&
+      rabbitmqadmin -H rabbitmq -u ${RABBIT_DEFAULT_USER} -p ${RABBIT_DEFAULT_PASS} declare user name=${RABBIT_USER} password=${RABBIT_PASS} tags=none &&
+      rabbitmqadmin -H rabbitmq -u ${RABBIT_DEFAULT_USER} -p ${RABBIT_DEFAULT_PASS} declare permission vhost=/ user=${RABBIT_USER} configure='.*' write='.*' read='.*' &&
       echo 'Successfully created rabbitmq user account for worker!'"
     restart: no
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_lock
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
   
   # Gateway to Worker Bridge
   gateway_app:
     build: .
     container_name: gateway_app
     network_mode: "host"
-    command: ["python3", "Gateway_node.py"]
     environment:
-      - USERNAME=${RABBITMQ_WORKER_USER}
-      - PASSWORD=${RABBITMQ_WORKER_PASS}
+      - RABBIT_USER=${RABBIT_USER}
+      - RABBIT_PASS=${RABBIT_PASS}
+      - RABBIT_PORT=${RABBIT_PORT}
+      - RABBIT_HOST=${RABBIT_HOST}
       - BATCH_SIZE=${BATCH_SIZE}
       - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
       - INDEX_NAME=${INDEX_NAME}
       - QUEUE_NAME=${QUEUE_NAME}
-      - PYTHONUNBUFFERED=1
-    restart: always
+      - REDIS_URL=${REDIS_URL}
+    restart: "on-failure:3" 
     volumes:
       - .:/app
     depends_on:
@@ -56,6 +69,8 @@ services:
         condition: service_healthy
       rabbitmq_setup:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   rabbitmq_data:

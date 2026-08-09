@@ -1,2 +1,4 @@
-pika
+aio-pika
+aiohttp
 elasticsearch>=8.0.0,<9.0.0
+orjson

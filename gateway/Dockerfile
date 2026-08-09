@@ -1,6 +1,10 @@
 # Use lightweight Python base image
 FROM python:3.10-slim
 
+# Prevent Python from writing bytecode and buffering stdout
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Set working directory inside the container
 WORKDIR /app
 
@@ -19,5 +23,6 @@ COPY . .
 # Expose FastAPI port
 EXPOSE 8000
 
-# Execute Gateway script
-CMD ["python", "Gateway_node.py"]
+# Executive/JSON syntax passes signals directly to Uvicorn (PID 1)
+# "Gateway_node:app" assumes your file is named Gateway_node.py and your FastAPI instance is named 'app'
+CMD ["uvicorn", "Gateway_node:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--log-level", "info"]

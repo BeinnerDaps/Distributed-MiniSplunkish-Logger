@@ -37,15 +37,16 @@ services:
     command: ["python3", "-u", "W2G_node.py"]
     environment:
       - SERVER_NAME=${HOSTNAME}
-      - USERNAME=${USERNAME}
-      - PASSWORD=${PASSWORD}
-      - NUM_THREADS=${NUM_THREADS}
+      - RABBIT_USER=${RABBIT_USER}
+      - RABBIT_PASS=${RABBIT_PASS}
+      - RABBIT_PORT=${RABBIT_PORT}
+      - RABBIT_HOST=${RABBIT_HOST}
+      - PREFETCH_COUNT=${PREFETCH_COUNT}
       - GATEWAY_IP=${GATEWAY_IP}
       - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
       - INDEX_NAME=${INDEX_NAME}
       - QUEUE_NAME=${QUEUE_NAME}
-      - PYTHONUNBUFFERED=1
-    restart: always
+    restart: "on-failure:3" 
     volumes:
       - .:/app
     depends_on:

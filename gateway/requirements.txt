@@ -1,8 +1,11 @@
 aio-pika
+aiofiles
+aiohttp
 cryptography
-elasticsearch
+elasticsearch>=8.12.0,<9.0.0
 fastapi
 httpx
+orjson
 pydantic
 pydantic-settings
 PyJWT
