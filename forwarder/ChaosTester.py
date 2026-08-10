@@ -4,25 +4,6 @@ import random
 import threading
 import requests
 
-ELASTICSEARCH_URL = "http://elasticsearch:9200/logs"
-
-DEFAULT_USERNAME = 'rabbituser'
-DEFAULT_PASSWORD = 'rabbit1234'
-
-EC2_Gateway_IP = "3.0.107.3"
-EC2_Gateway_IP_WG = "10.13.13.1"
-EC2_Port = 5672
-
-EXTERNAL_IP = "103.231.240.136"
-INTERNAL_IP0 = "10.20.101.43"   # BROKER IP
-INTERNAL_IP1 = "10.20.101.44"
-INTERNAL_IP2 = "10.20.101.45"
-
-INTERNAL_PORT = 5672
-EXTERNAL_PORT0 = 32143
-EXTERNAL_PORT1 = 32144
-EXTERNAL_PORT2 = 32145
-
 # Global event to signal ingestion thread has finished, stops other queries
 INGEST_FINISHED = threading.Event()
 # Lock to prevent console print overlapping from multiple threads
@@ -112,7 +93,8 @@ def query_task(thread_id, gateway_ip):
 
 def main():
     print("--- Chaos Tester Script ---")
-    gateway_ip = input(f"Enter IP of gateway server [{EC2_Gateway_IP_WG}]: ").strip() or EC2_Gateway_IP_WG
+    gateway_ip = os.getenv("GATEWAY_IP",  "localhost")
+    gateway_ip = input(f"Enter IP of gateway server [{gateway_ip}]: ").strip() or gateway_ip
 
     file_path = ""
     while not os.path.exists(file_path):
