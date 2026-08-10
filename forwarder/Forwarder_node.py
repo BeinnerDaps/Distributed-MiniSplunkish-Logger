@@ -5,6 +5,8 @@ import re
 import requests
 import time
 
+GATEWAY_IP = "10.13.13.1"
+
 SYSLOG_REGEX = re.compile(
     r"""
     ^
@@ -260,8 +262,7 @@ class Forwarder:
         return f"{start_date}-{end_date}"
 
 def main():
-    gateway_ip = "10.13.13.1"
-    gateway_ip = input(f"Enter Gateway IP [{gateway_ip}]: ").strip() or gateway_ip
+    gateway_ip = input(f"Enter Gateway IP [{GATEWAY_IP}]: ").strip() or GATEWAY_IP
 
     forwarder = Forwarder(gateway_ip=gateway_ip, gateway_port=8000)
     print(f"-> Type 'help' for list of commands.")

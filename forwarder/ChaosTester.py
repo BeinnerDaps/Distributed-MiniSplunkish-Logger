@@ -4,6 +4,8 @@ import random
 import threading
 import requests
 
+GATEWAY_IP = "10.13.13.1"
+
 # Global event to signal ingestion thread has finished, stops other queries
 INGEST_FINISHED = threading.Event()
 # Lock to prevent console print overlapping from multiple threads
@@ -93,8 +95,7 @@ def query_task(thread_id, gateway_ip):
 
 def main():
     print("--- Chaos Tester Script ---")
-    gateway_ip = os.getenv("GATEWAY_IP",  "localhost")
-    gateway_ip = input(f"Enter IP of gateway server [{gateway_ip}]: ").strip() or gateway_ip
+    gateway_ip = input(f"Enter IP of gateway server [{GATEWAY_IP}]: ").strip() or GATEWAY_IP
 
     file_path = ""
     while not os.path.exists(file_path):
