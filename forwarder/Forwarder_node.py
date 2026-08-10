@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+import time
 
 SYSLOG_REGEX = re.compile(
     r"""
@@ -98,6 +99,7 @@ class Forwarder:
                 file_name = os.path.basename(file_path)
                 files = {"file": (file_name, file, "text/plain")}
 
+                start_time = time.time()
                 print(f"[*] Forwarder: Streaming raw payload '{file_name}' to Gateway ({self.gateway_ip})...")
                 res = requests.post(url=url, files=files, timeout=timeout)
 
@@ -105,7 +107,8 @@ class Forwarder:
                     print(f"[!] Gateway Error ({res.status_code}): {res.json().get("detail", res.text)}")
                     return
                 
-                print(f"[+] Success: Transmitted raw payload successfully.")
+                elapsed = time.time() - start_time
+                print(f"[+] Success: Transmitted raw payload successfully. (Took {elapsed:.2f}s)")
                 res = res.json()
                 job_id = res.get("job_id", "N/A")
                 msg = res.get("message", "Accepted")
