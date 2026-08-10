@@ -25,8 +25,8 @@ SYSLOG_REGEX = re.compile(
 )
 
 class AsyncWorker:
-    def __init__(self, server_name: str, rabbit_user: str , rabbit_pass: str, rabbit_port: str, rabbit_host: str, 
-                 prefetch_count: int, gateway_ip: str, es_cluster: list[str], index_name: str, queue_name: str 
+    def __init__(self, server_name: str, rabbit_user: str , rabbit_pass: str, rabbit_port: int, rabbit_host: str, 
+                 prefetch_count: int, queue_name: str, gateway_ip: str,  index_name: str, es_cluster: list[str] 
     ):  
         # Worker-Gateway variables
         self.server_name    = server_name
@@ -244,7 +244,6 @@ class AsyncWorker:
         match = SYSLOG_REGEX.match(line)
         if match:
             match = match.groupdict()
-            msg = match.get("message")
             return {
                 # Metadata
                 "tags":         ["parsed"],
@@ -256,8 +255,8 @@ class AsyncWorker:
                 "hostname":     match.get("hostname"),
                 "process":      match.get("process"),
                 "pid":          int(match["pid"]) if match.get("pid") else None,
-                "severity":     _infer_severity(msg),
-                "message":      msg,
+                "severity":     _infer_severity(match.get("message")),
+                "message":      match.get("message"),
                 "raw_log":      line 
             }
 
@@ -290,15 +289,15 @@ class AsyncWorker:
 if __name__ == "__main__":
     worker = AsyncWorker(
         server_name     = os.getenv("SERVER_NAME", "default_name"), 
+        gateway_ip      = os.getenv("GATEWAY_IP",  "localhost"),
         rabbit_user     = os.getenv("RABBIT_USER", "default_user"), 
         rabbit_pass     = os.getenv("RABBIT_PASS", "default_pass"), 
-        rabbit_port     = os.getenv("RABBIT_PORT", 0), 
-        rabbit_host     = os.getenv("RABBIT_HOST", "default_host"), 
-        gateway_ip      = os.getenv("GATEWAY_IP",  "127.0.0.1"),
-        es_cluster      = os.getenv("ES_CLUSTER",  "http://localhost:9200").split(","),
-        index_name      = os.getenv("INDEX_NAME",  "default_idx"),
+        rabbit_host     = os.getenv("RABBIT_HOST", "default_host"),
+        rabbit_port     = int(os.getenv("RABBIT_PORT", 0)), 
+        prefetch_count  = int(os.getenv("PREFETCH_COUNT", 0)),
         queue_name      = os.getenv("QUEUE_NAME",  "default_que"),
-        prefetch_count  = int(os.getenv("PREFETCH_COUNT", 0))    
+        index_name      = os.getenv("INDEX_NAME",  "default_idx"),
+        es_cluster      = os.getenv("ES_CLUSTER",  "http://localhost:9200").split(",")
     )
 
     try:

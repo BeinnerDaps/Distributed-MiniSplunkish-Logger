@@ -30,7 +30,6 @@ PRINT_LOCK = threading.Lock()
 
 # Query pool, random selection
 QUERY_POOL = [
-    ("SEARCH_DATE", "Feb 15 00:00:04"),
     ("SEARCH_SEVERITY", "WARN"),
     ("SEARCH_SEVERITY", "ERROR"),
     ("SEARCH_SEVERITY", "INFO"),
@@ -40,6 +39,9 @@ QUERY_POOL = [
     ("SEARCH_KEYWORD", "dpkg"),
     ("SEARCH_KEYWORD", "logrotate"),
     ("COUNT_KEYWORD", "root"),
+    ("COUNT_KEYWORD", "user"),
+    ("COUNT_KEYWORD", "session opened"),
+    ("COUNT_KEYWORD", "session closed "),
     
 ]
 
