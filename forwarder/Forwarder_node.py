@@ -1,6 +1,6 @@
-import requests
-import re
 import os
+import re
+import requests
 
 SYSLOG_REGEX = re.compile(
     r"""
@@ -19,11 +19,29 @@ class Forwarder:
     def __init__(self, gateway_ip: str, gateway_port: int):
         self.gateway_ip  = gateway_ip
         self.api_enpoint = f"http://{gateway_ip}:{gateway_port}"
+        self.valid_modes = {
+            "SEARCH_DATE", 
+            "SEARCH_HOST", 
+            "SEARCH_DAEMON",
+            "SEARCH_SEVERITY", 
+            "SEARCH_KEYWORD", 
+            "COUNT_KEYWORD"
+        }
 
-    
     def process_command(self, command: str):
-        command = command.strip().split()
+        def _help():
+            print(f"")
+            print(f" --- Available commands: ---")
+            print(f"   - ingest <file_path>")
+            print(f"   - query <mode*> <value>")
+            print(f"   - purge")
+            print(f"   - exit / quit")
+            print(f"")
+            print(f" -> modes*:")
+            for mode in self.valid_modes:
+                print(f"   - {mode}")
 
+        command = command.split()
         if not command:
             print("[!] Forwarder: Invalid Input.")
             return
@@ -40,15 +58,12 @@ class Forwarder:
                 self.purge()
             case ("EXIT" | "QUIT", []):
                 print("[~] Exiting...")
-                exit(0)
+                exit(0)     
+            case ("HELP", []):
+                _help()
             case _:
                 print("[!] Invalid command format.")
-                print("    Available commands:")
-                print("    - ingest <file_path>")
-                print("    - query <MODE> <value>")
-                print("    - purge")
-                print("    - exit / quit")
-
+                print(f"-> Type 'help' for list of commands.")
 
     def validate_file(self, file_path: str) -> bool:
         """ Fast-fail check to ensure the file is non-empty and UTF-8 readable. """
@@ -100,7 +115,10 @@ class Forwarder:
         except requests.exceptions.RequestException as e:
             print(f"[!] Network Error: Could not connect to Gateway at {self.gateway_ip}. Details: {e}")
 
-    def query(self, mode: str, value: str, qsize: int = 100, timeout: float = 10.0):     
+    def query(self, mode: str, value: str, qsize: int = 100, timeout: float = 10.0):    
+        if mode not in self.valid_modes:
+            print(f"[!] Client Error: Invalid query mode '{mode}'")
+            return
         try:
             url = f"{self.api_enpoint}/query/"
             params = {"mode": mode, "value": value, "qsize": qsize}
@@ -171,14 +189,15 @@ class Forwarder:
 
 def main():
     gateway_ip = "10.13.13.1"
-    gateway_ip = input(f"Enter IP of gateway server [{gateway_ip}]: ").strip() or gateway_ip
+    gateway_ip = input(f"Enter Gateway IP [{gateway_ip}]: ").strip() or gateway_ip
 
     forwarder = Forwarder(gateway_ip=gateway_ip, gateway_port=8000)
+    print(f"-> Type 'help' for list of commands.")
 
     while True:
         try:
             command = input("\nEnter a command: ")
-            forwarder.process_command(command)
+            forwarder.process_command(command.strip())
         except KeyboardInterrupt:
             print("\nExiting...")
             break

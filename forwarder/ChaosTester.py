@@ -30,13 +30,17 @@ PRINT_LOCK = threading.Lock()
 
 # Query pool, random selection
 QUERY_POOL = [
+    ("SEARCH_DATE", "Feb 15 00:00:04"),
+    ("SEARCH_SEVERITY", "WARN"),
     ("SEARCH_SEVERITY", "ERROR"),
     ("SEARCH_SEVERITY", "INFO"),
     ("SEARCH_DAEMON", "systemd"),
     ("SEARCH_DAEMON", "sshd"),
-    ("SEARCH_KEYWORD", "timeout"),
+    ("SEARCH_KEYWORD", "206.123.145.57"),
+    ("SEARCH_KEYWORD", "dpkg"),
+    ("SEARCH_KEYWORD", "logrotate"),
     ("COUNT_KEYWORD", "root"),
-    ("SEARCH_KEYWORD", "network"),
+    
 ]
 
 def safe_print(message):
@@ -58,11 +62,12 @@ def ingest_task(file_path, gateway_ip):
             response = requests.post(url, files=files)
             
             elapsed = time.time() - start_time
-            if response.status_code == 200:
+            if response.status_code in (200, 202):
                 result = response.json()
                 safe_print(f"[+] [INGEST] SUCCESS: {result.get('message')} (Took {elapsed:.2f}s)")
             else:
                 safe_print(f"[!] [INGEST] FAILED with status {response.status_code}: {response.text}")
+        time.sleep(30) 
     except Exception as e:
         safe_print(f"[!] [INGEST] CRITICAL EXCEPTION: {e}")
     finally:
@@ -86,10 +91,10 @@ def query_task(thread_id, gateway_ip):
             resp = requests.post(url, params=params, timeout=5.0)
             request_count += 1
             
-            if resp.status_code == 200:
+            if resp.status_code in (200, 202):
                 success_count += 1
-                data = resp.json()
-                count = data.get("count", len(data.get("results", [])))
+                resp = resp.json()
+                count = resp.get("total_matches", 0)
                 safe_print(f"    [QUERY-{thread_id}] OK | {mode}:{value} | Hits: {count}")
             else:
                 safe_print(f"    [QUERY-{thread_id}] HTTP {resp.status_code} | {mode}:{value}")
@@ -105,10 +110,8 @@ def query_task(thread_id, gateway_ip):
 
 def main():
     print("--- Chaos Tester Script ---")
-    gateway_ip = input(f"Enter IP of gateway server [{EC2_Gateway_IP}]: ").strip() or EC2_Gateway_IP
-    username = input(f"Username [{DEFAULT_USERNAME}]: ").strip() or DEFAULT_USERNAME
-    password = input(f"Password [{DEFAULT_PASSWORD}]: ").strip() or DEFAULT_PASSWORD
-    
+    gateway_ip = input(f"Enter IP of gateway server [{EC2_Gateway_IP_WG}]: ").strip() or EC2_Gateway_IP_WG
+
     file_path = ""
     while not os.path.exists(file_path):
         file_path = input("Enter path to log file for ingestion: ").strip()

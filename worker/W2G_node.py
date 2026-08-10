@@ -63,6 +63,7 @@ class AsyncWorker:
                 print("[!] Worker: Aborting startup. Unable to connect to RabbitMQ broker.")
                 return
 
+            print(f"[*] Worker: '{self.server_name}' active. Listening for '{self.queue_name}'...")
             # Use AbstractQueueIterator as a buffer queue listening for messages
             async with main_queue.iterator() as queue_iter:
                 async for message in queue_iter:
@@ -118,7 +119,6 @@ class AsyncWorker:
 
         return False
 
-
     async def connect_to_rabbitmq(self, max_retries: int = 10) -> aio_pika.abc.AbstractQueue | None:
         """ Waits for gateway server to initialize RabbitMQ broker. """
         for attempt in range(1, max_retries+1) :
@@ -127,7 +127,7 @@ class AsyncWorker:
                 self.connection = await aio_pika.connect_robust(self.rabbit_url, timeout=10.0)
                 self.channel = await self.connection.channel()
 
-                # Set prefetch count for backpressure control
+                # Set prefetch count to limit rate of messages fetched to process
                 await self.channel.set_qos(prefetch_count=self.prefetch_count)
 
                 # Declare Dead Letter Exchange and Dead Letter Queue for rejected messages
@@ -135,6 +135,7 @@ class AsyncWorker:
                 dlq = await self.channel.declare_queue(self.dlq_name, durable=True)
                 await dlq.bind(dlx, routing_key=self.dlq_name)
 
+                # set queue type to quorum for distributed communication
                 main_queue = await self.channel.declare_queue(
                     name      = self.queue_name, 
                     durable   = True,
@@ -145,7 +146,6 @@ class AsyncWorker:
                     }
                 )
 
-                print(f"[*] Worker: '{self.server_name}' active. Listening for '{self.queue_name}'...")
                 return main_queue
             except (AMQPConnectionError, AMQPChannelError, AMQPError, ConnectionRefusedError, OSError) as e:
                 print(f" [!] Pika: RabbitMQ not ready yet ({e}). Waiting {0.5*attempt}s before retrying...")
