@@ -5,7 +5,7 @@ import hashlib
 import httpx
 import orjson
 import os
-import redis.asyncio as aio_redis
+import redis.asyncio
 import uvicorn
 from contextlib import asynccontextmanager
 from elasticsearch import AsyncElasticsearch
@@ -18,7 +18,7 @@ from urllib.parse import quote
 # ALGORITHM = "HS256"
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
-REDIS_CLIENT = aio_redis.from_url(REDIS_URL, decode_responses=True)
+REDIS_CLIENT = redis.asyncio.from_url(REDIS_URL, decode_responses=True)
 
 UPLOAD_SEMAPHORE = asyncio.Semaphore(2)
 TEMP_DIR = Path("/tmp/nsdsyst14_ingest")
@@ -435,8 +435,12 @@ async def advanced_query(mode: str, value: str, qsize: int = Query(default=100, 
     # Create query json structure
     is_count = bool(mode == "COUNT_KEYWORD")
     es_query = { "size": qsize, "sort": [{"timestamp": {"order":"desc"}}] } if not is_count else {}
+
+    if mode == "SEARCH_DATE":
+        start, end = [dates.strip() for dates in (value.split("-")*2)[:2]]
+
     match mode:
-        case "SEARCH_DATE":     es_query["query"] = {"prefix": {"raw_log": value}}
+        case "SEARCH_DATE":     es_query["query"] = {"range": {"timestamp": {"gte": start, "lte": end}}}
         case "SEARCH_HOST":     es_query["query"] = {"bool": {"filter": [{"term": {"hostname": value}}]}}
         case "SEARCH_DAEMON":   es_query["query"] = {"bool": {"filter": [{"term": {"process": value}}]}}
         case "SEARCH_SEVERITY": es_query["query"] = {"bool": {"filter": [{"term": {"severity": value}}]}}

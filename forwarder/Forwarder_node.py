@@ -1,3 +1,5 @@
+import calendar
+from datetime import datetime
 import os
 import re
 import requests
@@ -32,15 +34,29 @@ class Forwarder:
     def process_command(self, command: str):
         def _help():
             print(f"")
-            print(f" --- Available commands: ---")
+            print(f" -> commands:")
             print(f"   - ingest <file_path>")
-            print(f"   - query <mode*> <value>")
+            print(f"   - query <mode*> <value*>")
             print(f"   - purge")
             print(f"   - exit / quit")
             print(f"")
-            print(f" -> modes*:")
+            print(f" -> mode*:")
             for mode in self.valid_modes:
                 print(f"   - {mode}")
+            print(f"")
+            print(f" -> value*:")
+            print(f"    - date format")
+            print(f"       MMM")
+            print(f"       MMM DD")
+            print(f"       MMM DD HH")
+            print(f"       MMM DD HH:MM")
+            print(f"       MMM DD HH:MM:SS")
+            print(f"    - date range")
+            print(f"       MMM DD HH:MM:SS-MMM DD HH:MM:SS")
+            print(f"       MMM DD-MMM DD")
+            print(f"       MMM-MMM")
+            print(f"    - severities")
+            print(f"       INFO WARN ERROR")
 
         command = command.split()
         if not command:
@@ -60,37 +76,14 @@ class Forwarder:
             case ("EXIT" | "QUIT", []):
                 print("[~] Exiting...")
                 exit(0)     
-            case ("HELP", []):
+            case ("HELP" | "H", []):
                 _help()
             case _:
                 print("[!] Invalid command format.")
                 print(f"-> Type 'help' for list of commands.")
-
-    def validate_file(self, file_path: str) -> bool:
-        """ Fast-fail check to ensure the file is non-empty and UTF-8 readable. """
-        if not os.path.exists(file_path):
-            print(f"[!] Error: File '{file_path}' not found.")
-            return False
-        
-        if not file_path.endswith((".txt",".log")):
-            print(f"[!] Error: File type invalid. Only '.txt' and '.log' files are accepted.")
-            return False
-        
-        if os.path.getsize(file_path) == 0:
-            print(f"[!] Pre-flight failed: File '{file_path}' is completely empty (0 bytes).")
-            return False
-        
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="strict") as f:
-                f.read(1024)  # Read first 1KB to test encoding
-        except UnicodeDecodeError:
-            print(f"[!] Pre-flight failed: File '{file_path}' is binary or corrupt (not valid UTF-8 text).")
-            return False
-        
-        return True
    
     def ingest(self, file_path: str, timeout: tuple[float, float] = (10.0, 300.0)):
-        if not self.validate_file(file_path):
+        if not self._validate_file(file_path):
             return
         
         try:
@@ -103,16 +96,20 @@ class Forwarder:
                 print(f"[*] Forwarder: Streaming raw payload '{file_name}' to Gateway ({self.gateway_ip})...")
                 res = requests.post(url=url, files=files, timeout=timeout)
 
+                
                 if res.status_code not in (200, 202):
                     print(f"[!] Gateway Error ({res.status_code}): {res.json().get("detail", res.text)}")
                     return
-                
+
                 elapsed = time.time() - start_time
                 print(f"[+] Success: Transmitted raw payload successfully. (Took {elapsed:.2f}s)")
+
                 res = res.json()
+
                 job_id = res.get("job_id", "N/A")
                 msg = res.get("message", "Accepted")
-                print(f"[+] Server res: {res.get('message')}")
+
+                print(f"[+] Server response: {msg} {job_id}")
         except requests.exceptions.Timeout:
             print(f"[!] Timeout Error: Gateway at {self.gateway_ip} took too long to respond.")
         except requests.exceptions.RequestException as e:
@@ -122,8 +119,13 @@ class Forwarder:
         if mode not in self.valid_modes:
             print(f"[!] Client Error: Invalid query mode '{mode}'")
             return
+        
         try:
             url = f"{self.api_enpoint}/query/"
+
+            if mode == "SEARCH_DATE":
+                value = self._parse_dates(value)
+
             params = {"mode": mode, "value": value, "qsize": qsize}
 
             print(f"[*] Forwarder: Sending query '{mode}' to Gateway ({self.gateway_ip})...")
@@ -138,7 +140,7 @@ class Forwarder:
                 count = res.get("count", 0)
                 print(f"[+] Success: Found {count:,} log entry(s) matching keyword '{value}'")
                 return
-
+                
             hits = res.get("results", [])
             total_matches = res.get("total_matches", len(hits))
             returned_count = res.get("returned_count", len(hits))
@@ -189,6 +191,73 @@ class Forwarder:
             print(f"[!] Timeout Error: Gateway at {self.gateway_ip} failed to respond within {timeout} seconds.")
         except requests.exceptions.RequestException as e:
             print(f"[!] Network Error: Could not connect to Gateway at {self.gateway_ip}. Details: {e}")
+
+    def _validate_file(self, file_path: str) -> bool:
+        """ Fast-fail check to ensure the file is non-empty and UTF-8 readable. """
+        if not os.path.exists(file_path):
+            print(f"[!] Error: File '{file_path}' not found.")
+            return False
+        
+        if not file_path.endswith((".txt",".log")):
+            print(f"[!] Error: File type invalid. Only '.txt' and '.log' files are accepted.")
+            return False
+        
+        if os.path.getsize(file_path) == 0:
+            print(f"[!] Pre-flight failed: File '{file_path}' is completely empty (0 bytes).")
+            return False
+        
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="strict") as f:
+                f.read(1024)  # Read first 1KB to test encoding
+        except UnicodeDecodeError:
+            print(f"[!] Pre-flight failed: File '{file_path}' is binary or corrupt (not valid UTF-8 text).")
+            return False
+        
+        return True
+
+    def _parse_dates(self, value: str) -> str:
+        """Normalizes 'Feb 18', 'Feb', or full timestamps into ES-compliant date strings."""
+        def parse_date_boundary(val: str, is_end: bool = False):
+            val = " ".join(val.strip().split())
+            year = datetime.now().year
+
+            # 1. Full timestamp already provided (e.g., "Feb 18 13:18:41")
+            try:
+                datetime.strptime(f"{year} {val}", f"%Y %b %d %H:%M:%S")
+                return val
+            except ValueError:
+                pass
+
+            # 2. Date with Day (e.g., "Feb 18" or "Feb 8")
+            try:
+                dt = datetime.strptime(f"{year} {val}", f"%Y %b %d")
+                time_part = "23:59:59" if is_end else "00:00:00"
+                return f"{dt.strftime('%b %d')} {time_part}"
+            except ValueError:
+                pass
+
+            # 3. Month only (e.g., "Feb" or "Mar")
+            try:
+                dt = datetime.strptime(f"{year} {val}", f"%Y %b")
+                month_str = dt.strftime("%b")
+                if is_end:
+                    last_day = calendar.monthrange(year, dt.month)[1]
+                    return f"{month_str} {last_day:02d} 23:59:59"
+                else:
+                    return f"{month_str} 01 00:00:00"
+            except ValueError:
+                return val
+
+        # --- Search Handler ---
+        parts = value.split("-")
+
+        start_raw = parts[0]
+        end_raw = parts[1] if len(parts) > 1 else parts[0]
+
+        start_date = parse_date_boundary(start_raw.strip(), is_end=False)
+        end_date = parse_date_boundary(end_raw.strip(), is_end=True)
+
+        return f"{start_date}-{end_date}"
 
 def main():
     gateway_ip = "10.13.13.1"

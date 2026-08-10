@@ -3,16 +3,36 @@
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
-    container_name: ${HOSTNAME}-elasticsearch
+    container_name: ${HOSTNAME}-es
     network_mode: "host"
     environment:
+      # Node & Cluster Identity
       - node.name=${HOSTNAME}
       - cluster.name=${CLUSTER_NAME}
-      - network.host=0.0.0.0
+      - node.roles=master,data,ingest
+
+      # --- Networking & Cluster Discovery ---
+      - network.host=0.0.0.0                 
+      - network.publish_host=_wg0_          # Auto-detect IP on WireGuard
       - discovery.seed_hosts=${WORKER_1_IP}:9300,${WORKER_2_IP}:9300,${WORKER_3_IP}:9300
       - cluster.initial_master_nodes=${NODE_NAME1},${NODE_NAME2},${NODE_NAME3}
+
+      # --- Fault Tolerance & Cluster Recovery ---
+      - gateway.recover_after_data_nodes=2  # Prevents shard allocation until at least 2/3 nodes are alive
+      - gateway.expected_data_nodes=3       # Waits for all 3 nodes on a cold cluster start
+      - gateway.recover_after_time=5m       # Max timeout to wait for expected_nodes before recovering with quorum
+
+      # --- Relax fault detection during slow boot ---
+      - cluster.fault_detection.follower_check.timeout=30s
+      - cluster.fault_detection.follower_check.retry_count=5
+      - cluster.fault_detection.leader_check.timeout=30s
+      - cluster.fault_detection.leader_check.retry_count=5
+
+      # --- Memory & Performance Stability ---
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"    # Minimum 50% of available container RAM (Xms == Xmx)
+
+      # --- Security ---
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"  # Increased to 2GB minimum for 3-node clusters
     ulimits:
       nofile:
         soft: 65536
@@ -27,6 +47,10 @@ services:
       timeout: 5s
       retries: 20
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
   
   # Worker to Gateway Bridge
   worker_to_gateway:

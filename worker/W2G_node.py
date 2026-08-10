@@ -238,7 +238,9 @@ class AsyncWorker:
             elif any(k in msg_lower for k in ["error", "fatal", "critical", "emergency"]):
                 return "ERROR"
             return "INFO"
-                    
+
+        # normalize line spaces
+        line = re.sub(r'[ \t]+', ' ', line)   
         match = SYSLOG_REGEX.match(line)
         if match:
             match = match.groupdict()
@@ -250,13 +252,13 @@ class AsyncWorker:
                 "worker":       self.server_name,
 
                 # Core Log Fields
-                "timestamp":    match.get("timestamp"),
+                "timestamp":    " ".join(match.get("timestamp").split()),
                 "hostname":     match.get("hostname"),
                 "process":      match.get("process"),
                 "pid":          int(match["pid"]) if match.get("pid") else None,
                 "severity":     _infer_severity(msg),
                 "message":      msg,
-                "raw_log":      line   
+                "raw_log":      line 
             }
 
         return {
