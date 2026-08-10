@@ -25,7 +25,6 @@ QUERY_POOL = [
     ("COUNT_KEYWORD", "user"),
     ("COUNT_KEYWORD", "session opened"),
     ("COUNT_KEYWORD", "session closed "),
-    
 ]
 
 def safe_print(message):

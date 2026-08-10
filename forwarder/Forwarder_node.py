@@ -24,14 +24,7 @@ class Forwarder:
     def __init__(self, gateway_ip: str, gateway_port: int):
         self.gateway_ip  = gateway_ip
         self.api_enpoint = f"http://{gateway_ip}:{gateway_port}"
-        self.valid_modes = {
-            "SEARCH_DATE", 
-            "SEARCH_HOST", 
-            "SEARCH_DAEMON",
-            "SEARCH_SEVERITY", 
-            "SEARCH_KEYWORD", 
-            "COUNT_KEYWORD"
-        }
+        self.valid_modes = ["SEARCH_JOB","SEARCH_DATE","SEARCH_HOST","SEARCH_DAEMON","SEARCH_SEVERITY","SEARCH_KEYWORD","COUNT_KEYWORD","COUNT_ES_NODES"]
 
     def process_command(self, command: str):
         def _help():
@@ -70,7 +63,7 @@ class Forwarder:
         match (cmd, args):
             case ("INGEST", [file_path]):
                 self.ingest(file_path)
-            case ("QUERY", [mode, *value_parts]) if value_parts:
+            case ("QUERY", [mode, *value_parts]):
                 value = " ".join(value_parts)
                 self.query(mode.upper(), value)
             case ("PURGE", []):
@@ -88,30 +81,25 @@ class Forwarder:
         if not self._validate_file(file_path):
             return
         
+        url = f"{self.api_enpoint}/ingest/"
+        file_name = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
         try:
             with open(file_path, "rb") as file:
-                url = f"{self.api_enpoint}/ingest/"
-                file_name = os.path.basename(file_path)
                 files = {"file": (file_name, file, "text/plain")}
 
                 start_time = time.time()
-                print(f"[*] Forwarder: Streaming raw payload '{file_name}' to Gateway ({self.gateway_ip})...")
+                print(f"[*] Streaming '{file_name}' logs to Gateway ({self.gateway_ip})...")
                 res = requests.post(url=url, files=files, timeout=timeout)
 
-                
                 if res.status_code not in (200, 202):
                     print(f"[!] Gateway Error ({res.status_code}): {res.json().get("detail", res.text)}")
                     return
 
-                elapsed = time.time() - start_time
-                print(f"[+] Success: Transmitted raw payload successfully. (Took {elapsed:.2f}s)")
-
-                res = res.json()
-
-                job_id = res.get("job_id", "N/A")
-                msg = res.get("message", "Accepted")
-
-                print(f"[+] Server response: {msg} {job_id}")
+                print(f"[+] Success: Transmitted {file_size} bytes successfully. (Took {time.time()-start_time:.2f}s)")
+                job_id = res.json().get("job_id", "N/A")
+                msg = res.json().get("message", "N/A")
+                print(f"[+] Server response: ({job_id}) {msg} ")
         except requests.exceptions.Timeout:
             print(f"[!] Timeout Error: Gateway at {self.gateway_ip} took too long to respond.")
         except requests.exceptions.RequestException as e:
@@ -121,28 +109,33 @@ class Forwarder:
         if mode not in self.valid_modes:
             print(f"[!] Client Error: Invalid query mode '{mode}'")
             return
-        
-        try:
-            url = f"{self.api_enpoint}/query/"
 
+        url = f"{self.api_enpoint}/query/"
+        try:
             if mode == "SEARCH_DATE":
                 value = self._parse_dates(value)
-
-            params = {"mode": mode, "value": value, "qsize": qsize}
-
-            print(f"[*] Forwarder: Sending query '{mode}' to Gateway ({self.gateway_ip})...")
-            res = requests.post(url=url, params=params, timeout=timeout)
+                
+            print(f"[*] Sending query '{mode}' to Gateway ({self.gateway_ip})...")
+            res = requests.post(url=url, params={"mode": mode, "value": value, "qsize": qsize}, timeout=timeout)
 
             if res.status_code not in (200, 202):
                 print(f"[!] Gateway Error ({res.status_code}): {res.json().get("detail", res.text)}")
                 return
             
             res = res.json()
+
+            if mode == "COUNT_ES_NODES":
+                total_nodes = res.get("total_nodes", -1)
+                data_nodes = res.get("data_nodes", -1)
+                cluster_status = res.get("cluster_status", "error")
+                print(f"[+] Status: {cluster_status.upper()} | Active: {total_nodes} | Holding data: {data_nodes}")
+                return
+            
             if mode == "COUNT_KEYWORD":
                 count = res.get("count", 0)
                 print(f"[+] Success: Found {count:,} log entry(s) matching keyword '{value}'")
                 return
-                
+
             hits = res.get("results", [])
             total_matches = res.get("total_matches", len(hits))
             returned_count = res.get("returned_count", len(hits))

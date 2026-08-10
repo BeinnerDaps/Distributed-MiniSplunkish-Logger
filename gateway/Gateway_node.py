@@ -418,17 +418,6 @@ async def ingest_logs(bg_task: BackgroundTasks, file: UploadFile = File(...)) ->
         "message": f"File '{file.filename}' uploaded and queued for background processing."
     } 
 
-"""Status polling endpoint read by client applications."""
-@app.get("/job/{job_id}/")
-async def get_job_status(job_id: str) -> dict:
-    job_info = await REDIS_CLIENT.hgetall(f"job:{job_id}")
-    if not job_info:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail=f"Job ID: {job_id} not found or expired."
-        )
-    return job_info
-
 """ QUERY standard Elasticsearch Query DSL for specific logs. """
 @app.post("/query/", status_code=status.HTTP_202_ACCEPTED)
 async def advanced_query(mode: str, value: str, qsize: int = Query(default=100, ge=1, le=10000)) -> dict:
@@ -436,16 +425,30 @@ async def advanced_query(mode: str, value: str, qsize: int = Query(default=100, 
     is_count = bool(mode == "COUNT_KEYWORD")
     es_query = { "size": qsize, "sort": [{"timestamp": {"order":"desc"}}] } if not is_count else {}
 
-    if mode == "SEARCH_DATE":
-        start, end = [dates.strip() for dates in (value.split("-")*2)[:2]]
-
     match mode:
-        case "SEARCH_DATE":     es_query["query"] = {"range": {"timestamp": {"gte": start, "lte": end}}}
-        case "SEARCH_HOST":     es_query["query"] = {"bool": {"filter": [{"term": {"hostname": value}}]}}
-        case "SEARCH_DAEMON":   es_query["query"] = {"bool": {"filter": [{"term": {"process": value}}]}}
-        case "SEARCH_SEVERITY": es_query["query"] = {"bool": {"filter": [{"term": {"severity": value}}]}}
-        case "SEARCH_KEYWORD":  es_query["query"] = {"multi_match": {"query": value, "fields": ["raw_log"]}}
-        case "COUNT_KEYWORD":   es_query["query"] = {"multi_match": {"query": value, "fields": ["raw_log"]}}
+        case "SEARCH_DATE":     
+            start, end = [dt.strip() for dt in (value.split("-")*2)[:2]]
+            es_query["query"] = {"range": {"timestamp": {"gte": start, "lte": end}}}
+        case "SEARCH_HOST":  
+            es_query["query"] = {"bool": {"filter": [{"term": {"hostname": value}}]}}
+        case "SEARCH_DAEMON":   
+            es_query["query"] = {"bool": {"filter": [{"term": {"process": value}}]}}
+        case "SEARCH_SEVERITY": 
+            es_query["query"] = {"bool": {"filter": [{"term": {"severity": value.upper()}}]}}
+        case "COUNT_KEYWORD" | "SEARCH_KEYWORD":  
+            es_query["query"] = {"multi_match": {"query": value, "fields": ["raw_log"]}}
+        case "SEARCH_JOB":
+            job_info = await REDIS_CLIENT.hgetall(f"job:{value}")
+            if not job_info:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job ID: {value} not found or expired.")
+            return job_info
+        case "COUNT_ES_NODES":
+            health_info = await gateway.es_client.cluster.health()
+            return {
+                "total_nodes": health_info["number_of_nodes"],
+                "data_nodes": health_info["number_of_data_nodes"],
+                "cluster_status": health_info["status"]
+            }
         case _: 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported command: {mode}")
 
