@@ -1,0 +1,97 @@
+# Dynamic HOSTNAME: echo 'export HOSTNAME=$(hostname)' >> ~/.bashrc
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: ${HOSTNAME}-es
+    network_mode: "host"
+    environment:
+      # Node & Cluster Identity
+      - node.name=${HOSTNAME}
+      - cluster.name=${CLUSTER_NAME}
+      - node.roles=master,data,ingest
+
+      # --- Networking & Cluster Discovery ---
+      - network.host=0.0.0.0                 
+      - network.publish_host=_wg0_          # Auto-detect IP on WireGuard
+      - discovery.seed_hosts=${WORKER_1_IP}:9300,${WORKER_2_IP}:9300,${WORKER_3_IP}:9300
+      - cluster.initial_master_nodes=${NODE_NAME1},${NODE_NAME2},${NODE_NAME3}
+
+      # --- Fault Tolerance & Cluster Recovery ---
+      - gateway.recover_after_data_nodes=2  # Prevents shard allocation until at least 2/3 nodes are alive
+      - gateway.expected_data_nodes=3       # Waits for all 3 nodes on a cold cluster start
+      - gateway.recover_after_time=5m       # Max timeout to wait for expected_nodes before recovering with quorum
+
+      # --- Relax fault detection during slow boot ---
+      - cluster.fault_detection.follower_check.timeout=30s
+      - cluster.fault_detection.follower_check.retry_count=5
+      - cluster.fault_detection.leader_check.timeout=30s
+      - cluster.fault_detection.leader_check.retry_count=5
+
+      # --- Memory & Performance Stability ---
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"    # Minimum 50% of available container RAM (Xms == Xmx)
+
+      # --- Security ---
+      - xpack.security.enabled=false
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: always
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      # Only mark healthy when cluster reaches yellow/green state
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -E '\"status\":\"(green|yellow)\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+  
+  # Worker to Gateway Bridge
+  worker_to_gateway:
+    build: .
+    container_name: ${HOSTNAME}-w2g
+    network_mode: "host"
+    working_dir: /app
+    command: ["python3", "-u", "W2G_node.py"]
+    environment:
+      - SERVER_NAME=${HOSTNAME}
+      - RABBIT_USER=${RABBIT_USER}
+      - RABBIT_PASS=${RABBIT_PASS}
+      - RABBIT_PORT=${RABBIT_PORT}
+      - RABBIT_HOST=${RABBIT_HOST}
+      - PREFETCH_COUNT=${PREFETCH_COUNT}
+      - GATEWAY_IP=${GATEWAY_IP}
+      - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
+      - INDEX_NAME=${INDEX_NAME}
+      - QUEUE_NAME=${QUEUE_NAME}
+    restart: "on-failure:3" 
+    volumes:
+      - .:/app
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    stop_grace_period: 30s
+  
+  # Worker to Worker Bridge
+  # worker_to_worker:
+  #   build: .
+  #   container_name: ${HOSTNAME}-w2w
+  #   network_node: "host"
+  #   command: ["python3", "W2W_node.py"]
+  #   environment:
+  #     - GATEWAY_IP=${GATEWAY_IP}
+  #     - WORKER_ID=${HOSTNAME}
+  #   restart: always
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+
+volumes:
+  es_data:
+    name: elasticsearch_data

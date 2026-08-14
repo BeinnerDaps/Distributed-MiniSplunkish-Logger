@@ -1,0 +1,14 @@
+aio-pika
+aiofiles
+aiohttp
+cryptography
+elasticsearch>=8.12.0,<9.0.0
+fastapi
+httpx
+orjson
+pydantic
+pydantic-settings
+PyJWT
+python-multipart
+redis
+uvicorn[standard]

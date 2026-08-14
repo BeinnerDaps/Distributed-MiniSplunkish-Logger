@@ -1,0 +1,102 @@
+# Dynamic HOSTNAME: echo 'export HOSTNAME=$(hostname)' >> ~/.bashrc
+services:
+  # Rabbitmq message broker
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: ${HOSTNAME}
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_NODENAME=rabbit@${HOSTNAME}
+      - RABBITMQ_DEFAULT_USER=${RABBIT_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBIT_DEFAULT_PASS}
+      
+      # --- Erlang VM Tuning for ARM64 Graviton (2 vCPUs) ---
+      # Optimizes thread pool and CPU scheduler binding for AWS Graviton t4g architecture
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +A 16 +sbwt very_short
+      # Caps RMQ memory trigger at 512MB. When hit, RabbitMQ pages to disk rather than crashing host
+      - RABBITMQ_DISK_FREE_LIMIT_ABSOLUTE=1000MB  
+      # Pauses publishers if host disk falls below 1GB free space
+      - RABBITMQ_VM_MEMORY_HIGH_WATERMARK_ABSOLUTE=384MB  
+      # Uses 60% of container RAM limit before publisher throttling
+      - RABBITMQ_VM_MEMORY_HIGH_WATERMARK_RELATIVE=0.6    
+      # Triggers disk alarm if free disk space < 2x total RAM
+      - RABBITMQ_DISK_FREE_LIMIT_RELATIVE=2.0             
+    restart: always
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          cpus: '1.2'        # Leaves 0.8 vCPU reserved for FastAPI & OS
+          memory: 600M       # Container hard limit to prevent OOM killing the Gateway
+        reservations:
+          memory: 150M
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  
+  # Setup Rabbitmq user for workers to use.
+  rabbitmq_setup:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-setup
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: >
+      bash -c "echo 'Configuring Worker User...' &&
+      rabbitmqadmin -H rabbitmq -u ${RABBIT_DEFAULT_USER} -p ${RABBIT_DEFAULT_PASS} declare user name=${RABBIT_USER} password=${RABBIT_PASS} tags=none &&
+      rabbitmqadmin -H rabbitmq -u ${RABBIT_DEFAULT_USER} -p ${RABBIT_DEFAULT_PASS} declare permission vhost=/ user=${RABBIT_USER} configure='.*' write='.*' read='.*' &&
+      echo 'Successfully created rabbitmq user account for worker!'"
+    restart: no
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_lock
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  
+  # Gateway to Worker Bridge
+  gateway_app:
+    build: .
+    container_name: gateway_app
+    network_mode: "host"
+    environment:
+      - RABBIT_USER=${RABBIT_USER}
+      - RABBIT_PASS=${RABBIT_PASS}
+      - RABBIT_PORT=${RABBIT_PORT}
+      - RABBIT_HOST=${RABBIT_HOST}
+      - BATCH_SIZE=${BATCH_SIZE}
+      - ES_CLUSTER=http://${WORKER_1_IP}:9200,http://${WORKER_2_IP}:9200,http://${WORKER_3_IP}:9200
+      - INDEX_NAME=${INDEX_NAME}
+      - QUEUE_NAME=${QUEUE_NAME}
+      - REDIS_URL=${REDIS_URL}
+    restart: "on-failure:3" 
+    volumes:
+      - .:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      rabbitmq_setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  rabbitmq_data:
+    name: gateway_rabbitmq_data
